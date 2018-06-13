@@ -30,7 +30,7 @@
 #include <sstream>
 #include <algorithm>
 #include <iomanip>
-#include "conan.h"
+#include "Conan.h"
 #include "PcapLiveDeviceList.h"
 #include "PcapFileDevice.h"
 #include "PlatformSpecificUtils.h"
