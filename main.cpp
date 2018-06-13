@@ -664,7 +664,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			 			printf("    -->Packet Number %d is ",endedConnection->retransmitted[0].at(i).oldPacketNumber);
 			 			if(endedConnection->retransmitted[0].at(i).partialRetransmission)
 			 				printf("partially retransmitted ");
-			 			else if (endedConnection->retransmitted[0].at(i).partialRetransmission)
+			 			else if (endedConnection->retransmitted[0].at(i).fullRetransmission)
 			 				printf("fully retransmitted ");
 			 			else
 			 				printf("retransmitted ");
@@ -761,7 +761,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			 			printf("    -->Packet Number %d is ",endedConnection->retransmitted[1].at(i).oldPacketNumber);
 			 			if(endedConnection->retransmitted[1].at(i).partialRetransmission)
 			 				printf("partially retransmitted ");
-			 			else if (endedConnection->retransmitted[1].at(i).partialRetransmission)
+			 			else if (endedConnection->retransmitted[1].at(i).fullRetransmission)
 			 				printf("fully retransmitted ");
 			 			else
 			 				printf("retransmitted ");
