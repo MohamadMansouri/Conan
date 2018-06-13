@@ -61,11 +61,6 @@ create-directories:
 	@$(MKDIR) -p Bin
 
 
-IPDefragUtil: start create-directories $(OBJS_FILENAMES)
-	@$(G++) $(PCAPPP_LIBS_DIR) $(PCAPPP_BUILD_FLAGS) -o "./Bin/IPDefragUtil" $(OBJS_FILENAMES) $(PCAPPP_LIBS)
-	@echo 'Finished successfully building: $(CUR_TARGET)'
-	@echo ' '
-
 conan: start create-directories $(OBJS_FILENAMES)
 	@$(G++) $(PCAPPP_LIBS_DIR) $(PCAPPP_BUILD_FLAGS) -o "./Bin/conan" $(OBJS_FILENAMES) $(PCAPPP_LIBS)
 	@echo 'Finished successfully building: $(CUR_TARGET)'
