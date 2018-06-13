@@ -68,7 +68,7 @@ struct retransmission
 	size_t newDataLength;
 	uint8_t* newData;
 	int newPacketNumber;
-	size_t offset;
+	int offset;
 
 	retransmission();
 	~retransmission();

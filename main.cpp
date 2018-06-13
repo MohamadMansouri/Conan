@@ -675,9 +675,14 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			 				if (GlobalConfig::getInstance().verbose == 2)
 			 				{
 				 				std::cout << cyan;
-								printf("\nOld Data (Length = %d)\n",(int)(endedConnection->retransmitted[0].at(i).oldDataLength));
-								printf("--------\n");
-				 				print_hex_ascii_line(endedConnection->retransmitted[0].at(i).oldData,endedConnection->retransmitted[0].at(i).oldDataLength);
+				 				if (endedConnection->retransmitted[0].at(i).offset < 0)
+				 					printf("\nThe retransmitted packet is not the previous packet so old data is not saved\n");
+				 				else
+				 				{
+									printf("\nOld Data (Length = %d)\n",(int)(endedConnection->retransmitted[0].at(i).oldDataLength));
+									printf("--------\n");
+					 				print_hex_ascii_line(endedConnection->retransmitted[0].at(i).oldData,endedConnection->retransmitted[0].at(i).oldDataLength);
+					 			}
 				 				std::cout << cyan;
 								printf("\nNew Data (Length = %d)\n",(int)(endedConnection->retransmitted[0].at(i).newDataLength));
 								printf("--------\n");
@@ -772,9 +777,14 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			 				if (GlobalConfig::getInstance().verbose == 2)
 			 				{
 				 				std::cout << cyan;
-								printf("\nOld Data (Length = %d)\n",(int)(endedConnection->retransmitted[1].at(i).oldDataLength));
-								printf("--------\n");
-				 				print_hex_ascii_line(endedConnection->retransmitted[1].at(i).oldData,endedConnection->retransmitted[1].at(i).oldDataLength);
+				 				if (endedConnection->retransmitted[0].at(i).offset < 0)
+				 					printf("\nThe retransmitted packet is not the previous packet so old data is not saved\n");
+				 				else
+				 				{				 				
+									printf("\nOld Data (Length = %d)\n",(int)(endedConnection->retransmitted[1].at(i).oldDataLength));
+									printf("--------\n");
+					 				print_hex_ascii_line(endedConnection->retransmitted[1].at(i).oldData,endedConnection->retransmitted[1].at(i).oldDataLength);
+					 			}
 				 				std::cout << cyan;
 								printf("\nNew Data (Length = %d)\n",(int)(endedConnection->retransmitted[1].at(i).newDataLength));
 								printf("--------\n");
