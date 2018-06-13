@@ -691,6 +691,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			 	}
 			 	printf("\n");
 		 	}
+		 	std::cout << yellow;
 		 	if(!endedConnection->retransmitted[1].empty() || multipleMacIndex == 3 || multipleMacIndex == 4 ||  multipleTtlIndex == 2)
 		 	{
 	 			printf("    Side 2:\n");
