@@ -686,7 +686,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 				 			}
 			 			}
 			 			else
-			 				printf("in packet number %d\n",endedConnection->retransmitted[0].at(i).newPacketNumber);
+			 				printf("in packet number %d with same data\n",endedConnection->retransmitted[0].at(i).newPacketNumber);
 			 		}
 			 	}
 			 	printf("\n");
@@ -782,7 +782,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 				 			}
 			 			}
 			 			else
-			 				printf("in packet number %d\n",endedConnection->retransmitted[1].at(i).newPacketNumber);
+			 				printf("in packet number %d with same data\n",endedConnection->retransmitted[1].at(i).newPacketNumber);
 			 		}
 			 	}
 		 	}
