@@ -10,8 +10,9 @@
 
 /**
  * @file
- * This is an implementation of TCP reassembly logic, which means reassembly of TCP messages spanning multiple TCP segments (or packets).<BR>
- * This logic can be useful in analyzing messages for a large number of protocols implemented on top of TCP including HTTP, SSL/TLS, FTP and many many more.
+ * This is an modified verson of the previous implementation of TCP reassembly logic, which means reassembly of TCP messages spanning multiple TCP segments (or packets).<BR>
+ * This logic can be useful in analyzing messages for a large number of protocols implemented on top of TCP including HTTP, SSL/TLS, FTP and many many more. The modification 
+ * aims to create a TCP analyser which investigates connections and looks for ambiguities.
  *
  * __General Features:__
  * - Manage multiple TCP connections under one pcpp#TcpReassembly instance
@@ -20,6 +21,11 @@
  * - Support missing TCP data
  * - TCP connections can end "naturally" (by FIN/RST packets) or manually by the user
  * - Support callbacks for new TCP data, connection start and connection end
+ *
+ * __General Features (NEW):__
+ * - Checking for multiple MacAddresses used in each connection
+ * - Checking for multiple time to live (TTL) used in each connection.
+ * - Investigates the TCP retransmissions in each connection
  *
  * __Logic Description:__
  * - The user creates an instance of the pcpp#TcpReassembly class
@@ -40,6 +46,15 @@
  *   Both of these callbacks contain data about the connection (5-tuple, 4-byte hash key describing the connection, etc.) and also a pointer to a "user cookie", meaning a pointer to a
  *   structure provided by the user during the creation of the pcpp#TcpReassembly instance. The end connection callback also provides the reason for closing it ("naturally" or manually)
  *
+ * __Logic Description (NEW):__
+ * - For each connection the program looks in the source and destination MacAddress in each packet of each side of the connection, if it finds a packet with a MacAddress different than 
+ *   the one used before by this side it flags this connection and saves the MacAddresses with the data carried in the payload.
+ * - For each connection the program looks in the TTL in each packet of each side of the connection, if it finds a packet with a TTL different than the one used before by this side it flags
+ *   this connection and saves the TTLs with the data carried in the payload.
+ * - For each connection the program looks in the retransmitted files, and keeps a flag that indicates if this retransmission was a fully or partially retransmitted, then it looks in the data retransmitted and tries to check if this data is different than the data sent in the previous packet of this side then it saves the old and new data (if the retransmitted packet is not the previous packet it just saves the new data).
+     The program is capable to deal with out of order packets, TCP keep-alive messages and missing packets even if the missing packets were the very first packets in the connection.
+
+     
  * __Basic Usage and APIs:__
  * - pcpp#TcpReassembly c'tor - Create an instance, provide the callbacks and the user cookie to the instance
  * - pcpp#TcpReassembly#ReassemblePacket() - Feed pcpp#TcpReassembly instance with packets
@@ -57,73 +72,132 @@
 namespace pcpp
 {
 
+/**
+ * @struct connectionAnalysisStruct
+ * Represents a retransmission instance in a connection
+ */
 struct retransmission
 {
+	/* flag to indicate pratially retransmission */
 	bool partialRetransmission;
+	/* flag to indicate full retransmission */
 	bool fullRetransmission;
+	/* flag to indicate transmissions with data different than the data retransmitted */
 	bool transmissionWithNewData;
+	/* size of the old data */
 	size_t oldDataLength;
+	/* pointer to old data */
 	uint8_t* oldData;
+	/* packet number of the old data */
 	int oldPacketNumber;
+	/* size of the new data */
 	size_t newDataLength;
+	/* pointer to new data */
 	uint8_t* newData;
+	/* packet number of the new data */
 	int newPacketNumber;
+	/* offset of the new data ( -ve means that the retransmitted data does not belong to the previous packet) */
 	int offset;
 
+	/**
+	* A c'tor for this struct that basically zeros all members
+	*/	
 	retransmission();
+	/**
+	* A d'tor for this strcut. Notice it frees the memory of old data and new data members
+	*/
 	~retransmission();
+	/**
+	* A copy constructor for this struct.
+	*/	
 	retransmission(const retransmission& other);
+	/**
+	* An assignment operator for this struct.
+	*/	
 	retransmission& operator=(const retransmission& other);
 	
-	private:
+private:
+
 	void copyData(const retransmission& other);
 
 };
 
+
+
+/**
+ * @struct connectionAnalysisStruct
+ * Represents flags and variables about each connection
+ */
 struct connectionAnalysisStruct
 {
+	/* the 2 sides IP addresses */
 	IPAddress* IP[2];
+	/* the 2 sides port numbers */
 	size_t Port[2];
+	/* a vector to store all the source MacAddresses used in the connection */
 	std::vector<MacAddress> srcMac[2];
+	/* a vector to store all the destination MacAddresses used in the connection */
 	std::vector<MacAddress> dstMac[2];
+	/* a vector to store all the TTLs used in the connection */
 	std::vector<uint8_t> ttl[2];
+	/* a vector to store all the retransmission instances found in the connection */
 	std::vector<retransmission> retransmitted[2];
+	/* the length of the data sent with the new source MacAddress of each side */
 	size_t newSrcMacDataLength[2];
+	/* pointer to the data sent with the new source MacAddress of each side */
 	uint8_t* newSrcMacData[2];
+	/* the length of the data sent with the new destinaton MacAddress of each side */
 	size_t newDstMacDataLength[2];
+	/* pointer to the data sent with the new destination MacAddress of each side */
 	uint8_t* newDstMacData[2];	
+	/* the length of the data sent with the new TTL of each side */
 	size_t newTtlDataLength[2];
+	/* pointer to the data sent with the new TTL of each side */
 	uint8_t* newTtlData[2];
+	/* a holder of the previous packet number of each side */
 	int packetNumber[2];
+	/* a holder of the previous data length of each side */
 	size_t dataLength[2];
+	/* a holder of the pointer of the previous data of each side */
 	uint8_t* data[2];
+	/* the initial sequence the connection is opened with */
 	uint32_t initialSeq[2];
+	/*
+	 * flag to indicate a weired connection. A weired connection is a one that has a retransmitted packet
+	 * of an uncaptured packet that has a sequence number less than the sequence number of the first packet seen in this connection
+	*/
 	bool weired;
+	
 
+	/**
+	* A c'tor for this struct that basically zeros all members
+	*/	
 	connectionAnalysisStruct() ;
-
-
+	/**
+	* A d'tor for this strcut. Notice it frees the memory of all the pointer and clear all the vectors
+	*/
 	~connectionAnalysisStruct();
-
-
+	/**
+	* An assignment operator for this struct.
+	*/	
 	connectionAnalysisStruct& operator=(const connectionAnalysisStruct& other);
-		/**
-	 * Set source IP
+	/**
+	 * Set First side IP
 	 * @param[in] sourceIP A pointer to the source IP to set. Notice the IPAddress object will be cloned
 	 */
 	void setSideZeroIP(const IPAddress* sourceIP) { IP[0] = sourceIP->clone(); }
-
 	/**
-	 * Set destination IP
+	 * Set Second side IP
 	 * @param[in] destIP A pointer to the destination IP to set. Notice the IPAddress object will be cloned
 	 */
 	void setSideOneIP(const IPAddress* destIP) { IP[1] = destIP->clone(); }
-
+	/**
+	* checks for new source MacAddresss, new destination MacAddresss and new TTL Then adds them to their corresponding vector and save the packets payload
+	*/
 	void pushNewData(int sideIndex, MacAddress sourceMac, MacAddress destinationMac, uint8_t timeToLive, uint8_t* data, size_t dataLength);
 
-
-
 private:
+
 	void copyData(const connectionAnalysisStruct& other);
 };
 

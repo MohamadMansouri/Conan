@@ -413,15 +413,6 @@ void connectionAnalysisStruct::pushNewData(int sideIndex, MacAddress sourceMac, 
 }
 
 
-
-
-
-
-
-
-
-
-
 ConnectionData::~ConnectionData()
 {
 	if (srcIP != NULL)
@@ -429,13 +420,6 @@ ConnectionData::~ConnectionData()
 
 	if (dstIP != NULL)
 		delete dstIP;
-/*
-	if (srcMac != NULL)
-		delete srcMac;
-	
-	if (dstMac != NULL)
-		delete dstMac;
-*/
 }
 
 ConnectionData::ConnectionData(const ConnectionData& other)
@@ -450,13 +434,7 @@ ConnectionData& ConnectionData::operator=(const ConnectionData& other)
 
 	if (dstIP != NULL)
 		delete dstIP;
-/*	
-	if (srcMac != NULL)
-		delete srcMac;
-	
-	if (dstMac != NULL)
-		delete dstMac;
-*/	
+
 	copyData(other);
 
 	return *this;
@@ -473,21 +451,10 @@ void ConnectionData::copyData(const ConnectionData& other)
 		dstIP = other.dstIP->clone();
 	else
 		dstIP = NULL;
-/*	
-	if (other.srcMac != NULL)
-		srcMac = new MacAddress(*other.srcMac);
-	else 
-		srcMac =NULL;
 
-	if (other.dstMac != NULL)
-		dstMac = new MacAddress(*other.dstMac);
-	else 
-		dstMac =NULL;
-*/
 	flowKey = other.flowKey;
 	srcPort = other.srcPort;
 	dstPort = other.dstPort;
-//	isOverlaped = other.isOverlaped;
 }
 
 
@@ -577,7 +544,7 @@ TcpReassembly::~TcpReassembly()
 
 void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<uint32_t, connectionAnalysisStruct* > &connAnalysis)
 {
-	//counter of the packet number
+	//counter for the packet number
 	static int count=0;
 	count++;
 	// get IP layer
@@ -590,17 +557,17 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 	if (ipLayer == NULL)
 		return;
 
-
-	// Ignore non-TCP packets
+	// get tcp layer
 	TcpLayer* tcpLayer = tcpData.getLayerOfType<TcpLayer>();
 	
 
+	// Ignore non-TCP packets
 	if (tcpLayer == NULL)
 	{
 		LOG_DEBUG("Ignoring Non TCP packet");
 		return;
 	}
-	//
+	// get ethernet layer
 	EthLayer* ethernetLayer =tcpData.getLayerOfType<EthLayer>();
 	if (ethernetLayer == NULL)
 	{
@@ -617,8 +584,8 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 	bool isFinOrRst = isFin || isRst;
 
 	// ignore ACK packets or TCP packets with no payload (except for SYN, FIN or RST packets which we'll later need)
-	//if (tcpPayloadSize == 0 && tcpLayer->getTcpHeader()->synFlag == 0 && !isFinOrRst)
-	//	return;
+	if (tcpPayloadSize == 0 && tcpLayer->getTcpHeader()->synFlag == 0 && !isFinOrRst)
+		return;
 
 	// if the actual TCP payload is smaller than the value written in IPV4's "total length" field then adjust tcpPayloadSize to avoid buffer overflow
 	if (tcpLayer->getLayerPayloadSize() < tcpPayloadSize)
@@ -627,7 +594,7 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		tcpPayloadSize = tcpLayer->getLayerPayloadSize();
 	}
 
-
+	// create a TcpReassembly instance
 	TcpReassemblyData* tcpReassemblyData = NULL;
 
 	// calculate flow key for this packet
@@ -647,9 +614,11 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 	IPv6Address srcIP6Addr = IPv6Address::Zero;
 	IPv4Address dstIP4Addr = IPv4Address::Zero;
 	IPv6Address dstIP6Addr = IPv6Address::Zero;
+	// calculate packet's source and dest MacAddress
 	MacAddress sourceMac = ((EthLayer*)ethernetLayer)->getSourceMac();
 	MacAddress destinationMac = ((EthLayer*)ethernetLayer)->getDestMac();
-	//LOG_DEBUG("this packet has a src mac %s",srcMac->toString().c_str());
+
+	// extract information from IP layer
 	uint8_t ttl;
 	if (ipLayer->getProtocol() == IPv4)
 	{
@@ -681,10 +650,7 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		tcpReassemblyData->connData.setDstIpAddress(dstIP);
 		tcpReassemblyData->connData.srcPort = ntohs(tcpLayer->getTcpHeader()->portSrc);
 		tcpReassemblyData->connData.dstPort = ntohs(tcpLayer->getTcpHeader()->portDst);
-		//tcpReassemblyData->connData.srcMac[0].push_back(sourceMac);
-		//tcpReassemblyData->connData.dstMac[0].push_back(destinationMac);
 		tcpReassemblyData->connData.flowKey= flowKey;
-		//tcpReassemblyData->connData.isOverlaped = Overlaped;
 		m_ConnectionList[flowKey] = tcpReassemblyData;
 
 		m_ConnectionInfo.push_back(tcpReassemblyData->connData);
@@ -693,17 +659,22 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		if (m_OnConnStart != NULL)
 			m_OnConnStart(tcpReassemblyData->connData, m_UserCookie);
 	}
-	else // connection already exists
+	// connection already exists
+	else 
 		tcpReassemblyData = iter->second;
 
-
+	// create a connectionAnalysisStruct Instance
 	connectionAnalysisStruct* connAnalysisInst = NULL;
+	
+	// find the connection in the connection map
 	std::map<uint32_t, connectionAnalysisStruct*>::iterator connectionAnalysisIter = connAnalysis.find(flowKey);
 	if (connectionAnalysisIter == connAnalysis.end())
 	{
+		// if it's a packet of a new connection, create a connectionAnalysisStruct object and add it to the active connection list
 		connAnalysisInst = new connectionAnalysisStruct();
 		connAnalysis[flowKey]=connAnalysisInst;
 	}
+	// connection already exists	
 	else 
 		connAnalysisInst = connectionAnalysisIter->second;
 	
@@ -712,6 +683,8 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 
 	// calculate packet's source port
 	uint16_t srcPort = ntohs(tcpLayer->getTcpHeader()->portSrc);
+	uint16_t dstPort = ntohs(tcpLayer->getTcpHeader()->portDst);
+	
 	// if this is a new connection and it's the first packet we see on that connection
 	if (tcpReassemblyData->numOfSides == 0)
 	{
@@ -722,10 +695,10 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		tcpReassemblyData->twoSides[sideIndex].setSrcIP(srcIP);
 		tcpReassemblyData->twoSides[sideIndex].srcPort = srcPort;
 		tcpReassemblyData->numOfSides++;
-		//tcpReassemblyData->twoSides[sideIndex].setSrcMac(srcMac);
-		//if(!tcpReassemblyData->twoSides[sideIndex].isOverlaped)
-		//	tcpReassemblyData->twoSides[sideIndex].isOverlaped=Overlaped;
+
 		connAnalysisInst->Port[sideIndex] = srcPort;
+		//here we set the other side's port since some connectoins can only have one side (uncomplete connections)
+		connAnalysisInst->Port[sideIndex+1] = dstPort;
 		connAnalysisInst->setSideZeroIP(srcIP);
 		connAnalysisInst->setSideOneIP(dstIP);
 
@@ -747,6 +720,7 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 			tcpReassemblyData->twoSides[sideIndex].setSrcIP(srcIP);
 			tcpReassemblyData->twoSides[sideIndex].srcPort = srcPort;
 
+			// the side port will be reset again (just to be more sure)
 			connAnalysisInst->Port[sideIndex] = srcPort;
 			connAnalysisInst->setSideZeroIP(srcIP);
 			connAnalysisInst->setSideOneIP(dstIP);
@@ -833,24 +807,12 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		// if it's the first packet we see on this side of the connection
 		if (first)
 		{
-			
+			// save the packet number 
 			connAnalysisInst->packetNumber[sideIndex] = count;
+			// save the initial sequence of each side
 			connAnalysisInst->initialSeq[sideIndex] = sequence;
-			size_t dataLength;
-			uint8_t* data;
-			
-			if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
-			{
-				dataLength = connAnalysisInst->dataLength[sideIndex];
-				data = new uint8_t[dataLength];
-				memcpy(data,connAnalysisInst->data[sideIndex],dataLength);
-			}
-			else
-			{
-				dataLength = 0;
-				data = NULL;
-			}
 
+			// if this packet holds data save them for farther usage in next packets
 			if (tcpPayloadSize != 0)
 			{
 				connAnalysisInst->dataLength[sideIndex] = tcpPayloadSize;
@@ -860,8 +822,9 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 
 			LOG_DEBUG("First data from this side of the connection");
 
+			// save the sequence for farther usage in next packets
 			tcpReassemblyData->twoSides[sideIndex].prevSequence=sequence;
-			// set initial sequence
+			// calculate the next expected sequence
 			tcpReassemblyData->twoSides[sideIndex].sequence = sequence + tcpPayloadSize;
 			if (tcpLayer->getTcpHeader()->synFlag != 0)
 				tcpReassemblyData->twoSides[sideIndex].sequence++;
@@ -883,7 +846,7 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 			// return - nothing else to do here
 			return;
 		}
-		// if packet is tcp keep-alive message
+		// handle case where this packet is tcp keep-alive message (it should not match sine we skipped 0 data acks)
 		if (sequence == tcpReassemblyData->twoSides[sideIndex].sequence - 1 && tcpPayloadSize == 0)
 		{
 				LOG_DEBUG("Received Tcp keep-alive message");
@@ -894,15 +857,17 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 
 				return;
 		}
+
 		// if packet sequence is smaller than expected - this means that part or all of the TCP data is being re-transmitted
 		if (sequence < tcpReassemblyData->twoSides[sideIndex].sequence)
 		{
-			
+			// extract the previous packet number
 			int oldPacketNumber = connAnalysisInst->packetNumber[sideIndex];
+			// save the packet number
 			connAnalysisInst->packetNumber[sideIndex] = count;
 			size_t dataLength;
 			uint8_t* data;
-			
+			// extract the previous packet data
 			if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
 			{
 				dataLength = connAnalysisInst->dataLength[sideIndex];
@@ -914,7 +879,7 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 				dataLength = 0;
 				data = NULL;
 			}
-
+			// save the new packet data
 			if (tcpPayloadSize != 0)
 			{
 				connAnalysisInst->dataLength[sideIndex] = tcpPayloadSize;
@@ -932,9 +897,9 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 			retransInst.newPacketNumber = count; 
 			
 
+			// calculate the data of the previous data packet 
 			if (data != NULL)
 			{
-				// calculate the data of the previous data packet 
 				retransInst.oldDataLength = dataLength;
 				retransInst.oldData = new uint8_t[dataLength];
 				memcpy(retransInst.oldData,data,dataLength);
@@ -1007,30 +972,17 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		else if (sequence == tcpReassemblyData->twoSides[sideIndex].sequence)
 		{
 
-			
+			// save the packet number
 			connAnalysisInst->packetNumber[sideIndex] = count;
-			size_t dataLength;
-			uint8_t* data;
-			
-			if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
-			{
-				dataLength = connAnalysisInst->dataLength[sideIndex];
-				data = new uint8_t[dataLength];
-				memcpy(data,connAnalysisInst->data[sideIndex],dataLength);
-			}
-			else
-			{
-				dataLength = 0;
-				data = NULL;
-			}
 
+			// if this packet holds data save them for farther usage in next packets
 			if (tcpPayloadSize != 0)
 			{
 				connAnalysisInst->dataLength[sideIndex] = tcpPayloadSize;
 				connAnalysisInst->data[sideIndex] = new uint8_t[tcpPayloadSize];
 				memcpy(connAnalysisInst->data[sideIndex],tcpLayer->getLayerPayload(),tcpPayloadSize);
 			}
-
+			// save the sequence for farther usage in next packets
 			tcpReassemblyData->twoSides[sideIndex].prevSequence=sequence;
 
 			// if TCP data size is 0 - nothing to do
@@ -1158,23 +1110,10 @@ void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyDat
 				// if fragment sequence matches the current sequence
 				if (curTcpFrag->sequence == tcpReassemblyData->twoSides[sideIndex].sequence)
 				{
-					
+					// update the packet number
 					connAnalysisInst->packetNumber[sideIndex] = curTcpFrag->count;
-					size_t dataLength;
-					uint8_t* data;
-					
-					if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
-					{
-						dataLength = connAnalysisInst->dataLength[sideIndex];
-						data = new uint8_t[dataLength];
-						memcpy(data,connAnalysisInst->data[sideIndex],dataLength);
-					}
-					else
-					{
-						dataLength = 0;
-						data = NULL;
-					}
 
+					// if this packet holds data save them for farther usage in next packets
 					if (curTcpFrag->dataLength != 0)
 					{
 						connAnalysisInst->dataLength[sideIndex] = curTcpFrag->dataLength;
@@ -1215,12 +1154,13 @@ void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyDat
 				// if fragment sequence has lower sequence than the current sequence
 				if (curTcpFrag->sequence < tcpReassemblyData->twoSides[sideIndex].sequence)
 				{
-
+					// extract the previous packet number
 					int oldPacketNumber = connAnalysisInst->packetNumber[sideIndex];
+					// update the packet number
 					connAnalysisInst->packetNumber[sideIndex] = curTcpFrag->count;
 					size_t dataLength;
 					uint8_t* data;
-					
+					// extract the data of the previous packet
 					if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
 					{
 						dataLength = connAnalysisInst->dataLength[sideIndex];
@@ -1233,6 +1173,7 @@ void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyDat
 						data = NULL;
 					}
 
+					// if this packet holds data save them for farther usage in next packets
 					if (curTcpFrag->dataLength != 0)
 					{
 						connAnalysisInst->dataLength[sideIndex] = curTcpFrag->dataLength;

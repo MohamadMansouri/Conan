@@ -1,24 +1,11 @@
 /**
- * TcpReassembly application
- * =========================
- * This is an application that captures data transmitted as part of TCP connections, organizes the data and stores it in a way that is convenient for protocol analysis and debugging.
- * This application reconstructs the TCP data streams and stores each connection in a separate file(s). TcpReassembly understands TCP sequence numbers and will correctly reconstruct
- * data streams regardless of retransmissions, out-of-order delivery or data loss.
- * TcpReassembly works more or less the same like tcpflow (https://linux.die.net/man/1/tcpflow) but probably with less options.
- * The main purpose of it is to demonstrate the TCP reassembly capabilities in PcapPlusPlus.
- * Main features and capabilities:
- *   - Captures packets from pcap/pcapng files or live traffic
- *   - Handles TCP retransmission, out-of-order packets and packet loss
- *   - Possibility to set a BPF filter to process only part of the traffic
- *   - Write each connection to a separate file
- *   - Write each side of each connection to a separate file
- *   - Limit the max number of open files in each point in time (to avoid running out of file descriptors for large files / heavy traffic)
- *   - Write a metadata file (txt file) for each connection with various stats on the connection: number of packets (in each side + total), number of TCP messages (in each side + total),
- *     number of bytes (in each side + total)
- *   - Write to console only (instead of files)
- *   - Set a directory to write files to (default is current directory)
- *
- * For more details about modes of operation and parameters run TcpReassembly -h
+ * Conan
+ * =====
+ * Conan is a network trafiic analyser that investigates pcap file, it reads the packets, reassembles all the TCP connections in the network trace, and for each connection it looks for any ambiguities.
+ * Conan looks in each TCP connections for retransmitted packets, and investigates further in each of them, it checks if the retransmission was partially or fully retransmitted and checks if this
+ * retransmission holds new data or the same data ( the new data may overlap with the old one). It also checks for multiple MacAddresses and multiple time to live used in one connection. 
+ * This program is submitted as a project for the digital forensic course tought at EURECOM engineering school. It touches the need of an efficient, reliable and easy to use network traffic analyser to
+ *  speed up and improve a network forensic operation. 
  */
 
 
@@ -435,7 +422,7 @@ static void tcpReassemblyConnectionStartCallback(ConnectionData connectionData, 
 	}
 }
 
-
+/* check for multiple macs in the srcMac and dstMac vector */
 int checkMultipleMac (std::vector<MacAddress> srcMac[2], std::vector<MacAddress> dstMac[2])
 {
 	if (srcMac[0].size() > 1)
@@ -452,7 +439,7 @@ int checkMultipleMac (std::vector<MacAddress> srcMac[2], std::vector<MacAddress>
 	
 	return 0;
 }
-
+/* check for multiple TTLs in the TTL vector */
 int checkMultipleTtl (std::vector<uint8_t> ttl[2])
 {
 	if (ttl[0].size() > 1)
@@ -464,12 +451,6 @@ int checkMultipleTtl (std::vector<uint8_t> ttl[2])
 	return 0;
 }
 
-void printData (uint8_t* data , size_t dataLength)
-{
-	for(size_t i=0; i<dataLength ; i++)
-		printf(" 0x%X", *(data+i));
-	printf("\n");
-}
 
 void
 print_hex_ascii_line(const uint8_t *payload, size_t len)
@@ -518,7 +499,7 @@ print_hex_ascii_line(const uint8_t *payload, size_t len)
 return;
 }
 
-
+/* checks the arguments og the option -n (print only specific connections) */
 bool checkCnxNumber (int count, int* cnxNumber, int cnxNumberLength)
 {
 	if (cnxNumberLength != 0)
@@ -544,12 +525,14 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 	int multipleMac = checkMultipleMac(endedConnection->srcMac, endedConnection->dstMac);
 	int multipleTtl = checkMultipleTtl(endedConnection->ttl);
 
+	// count ambiguities
 	if(!endedConnection->retransmitted[0].empty() || !endedConnection->retransmitted[1].empty() || (bool)multipleMac || (bool)multipleTtl)
 		{
 			GlobalConfig::getInstance().ambiguities++;
 			ambiguous = true;
 		}
 
+	// print this connection if the user didnt specified anything or specified this connection or specifed to print ambigious cnxs and this is one of them
 	if ( checkCnxNumber(count,cnxNumber,cnxNumberLength) || ( !(bool)cnxNumberLength && (GlobalConfig::getInstance().printAll || ambiguous) ))
 	{
 		// get a pointer to the connection manager
@@ -566,7 +549,6 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 		std::string destIP = endedConnection->IP[1]->toString();
 		size_t srcPort = endedConnection->Port[0];
 		size_t dstPort = endedConnection->Port[1]; 
-		// for IPv6 addresses, replace ':' with '_'
 
 
 		std::replace(sourceIP.begin(), sourceIP.end(), ':', '_');
@@ -594,25 +576,32 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 
 		int multipleMacIndex = checkMultipleMac(endedConnection->srcMac, endedConnection->dstMac);
 		int multipleTtlIndex = checkMultipleTtl(endedConnection->ttl);
+
+		// check verbosity
 		if (GlobalConfig::getInstance().verbose > 0 )
 		 {
+		 	// print a not for weired cnxs 
 	 		if(weired)
 	 		{
 				std::cout << red;
-	 			printf("    This connections has a retransmitted packet of an uncaptured packet that has a sequence number less than the sequence number of the first packet seen in this network (this packet is skipped)\n");
+	 			printf("    Note: This connections has a retransmitted packet of an uncaptured packet that has a sequence number less than the sequence number of the first packet seen in this connection (this packet was skipped)\n");
 	 			std::cout << yellow;
 	 		}
+
 	 		std::cout << yellow ;
+		 	// first side checks
 		 	if(!endedConnection->retransmitted[0].empty() || multipleMacIndex == 1 || multipleMacIndex == 2 ||  multipleTtlIndex == 1)
 		 	{
 	 			printf("    Side 1:\n");
-		 	
+		 		
+		 		// multiple source macaddress for side 1
 	 			if (multipleMacIndex == 1)
  				{
 	 				std::cout << yellow ;
  					printf("    -->Source MacAdresses used in the connection are: ");
  					for ( uint i=0;i < endedConnection->srcMac[0].size() ; i++)
  						printf("%s ",endedConnection->srcMac[0].at(i).toString().c_str() );
+
  					if (GlobalConfig::getInstance().verbose == 2)
  					{
 		 				std::cout << cyan;
@@ -621,10 +610,14 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 		 				print_hex_ascii_line(endedConnection->newSrcMacData[0],endedConnection->newSrcMacDataLength[0]);
 		 				std::cout << reset;	
  					}
+
  					else 
  						printf("\n");				
 
  				}
+
+
+		 		// multiple destination macaddress for side 1
 	 			if (multipleMacIndex == 2)
  				{
 	 				std::cout << yellow ;
@@ -639,11 +632,13 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 						printf("------------------------------------------------\n");
 		 				print_hex_ascii_line(endedConnection->newDstMacData[0],endedConnection->newDstMacDataLength[0]);
 		 				std::cout << reset;	
- 					} 
+ 					}
+
  					else 
  						printf("\n");				
  				}
 
+		 		// multiple ttl for side 1
 	 			if (multipleTtlIndex == 1)
 	 			{
  					std::cout << yellow ;
@@ -663,7 +658,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 
 
 	 			}
-
+	 			// retransmission of side 1
 			 	if (!endedConnection->retransmitted[0].empty())
 			 	{
 			 		for(uint i = 0; i < endedConnection->retransmitted[0].size(); i++)
@@ -705,11 +700,13 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			 	printf("\n");
 		 	}
 		 	std::cout << yellow;
+		 	// second side checks
 		 	if(!endedConnection->retransmitted[1].empty() || multipleMacIndex == 3 || multipleMacIndex == 4 ||  multipleTtlIndex == 2)
 		 	{
 	 		
 	 			printf("    Side 2:\n");
 		 	
+		 		// multiple source macaddress for side 2
 	 			if (multipleMacIndex == 3)
  				{
  					printf("    -->Source MacAdresses used in the connection are: ");
@@ -724,12 +721,14 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 		 				print_hex_ascii_line(endedConnection->newSrcMacData[1],endedConnection->newSrcMacDataLength[1]);
 		 				std::cout << reset;	
  					}
+
  					else 
  						printf("\n");				
+ 				}
  						
 
 
- 				}
+		 		// multiple destination macaddress for side 2
 	 			if (multipleMacIndex == 4)
  				{
  					printf("    -->Destination MacAdresses used in the connection are: ");
@@ -749,6 +748,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 
  				}
 
+		 		// multiple ttl for side 2
 	 			if (multipleTtlIndex == 2)
 	 				{
 						printf("    -->TTLs used in the connection are: ");
@@ -768,6 +768,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 	 					printf("\n");	 					
 	 				}
 
+	 			// retransmissions of side 2	
 			 	if (!endedConnection->retransmitted[1].empty())
 			 	{
 			 		for(uint i = 0; i < endedConnection->retransmitted[1].size(); i++)
@@ -941,10 +942,10 @@ int main(int argc, char* argv[])
  				index = optind-1;
 	            while(index < argc)
 	            {
-	                next = strdup(argv[index]); /* get login */
+	                next = strdup(argv[index]);
 	                index++;
 	                if(next[0] != '-')
-	                {         /* check if optarg is next switch */
+	                {         
 	                    cnxNumberLength++;
 	                }
 	                else break;
@@ -955,7 +956,7 @@ int main(int argc, char* argv[])
 	            
 	            while(index < argc)
 	            {
-	                next = strdup(argv[index]); /* get login */
+	                next = strdup(argv[index]); 
 	                index++;
 	                if(next[0] != '-')
 	                {        
