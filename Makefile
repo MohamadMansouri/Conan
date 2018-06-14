@@ -34,7 +34,7 @@ Obj/%.o: %.cpp
 UNAME := $(shell uname)
 CUR_TARGET := $(notdir $(shell pwd))
 
-#.SILENT:
+.SILENT:
 
 all:  dependents conan
 
