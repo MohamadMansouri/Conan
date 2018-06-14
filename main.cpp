@@ -786,7 +786,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			 				if (GlobalConfig::getInstance().verbose == 2)
 			 				{
 				 				std::cout << cyan;
-				 				if (endedConnection->retransmitted[0].at(i).offset < 0)
+				 				if (endedConnection->retransmitted[1].at(i).offset < 0)
 				 					printf("\nThe retransmitted packet is not the previous packet so old data is not saved\n");
 				 				else
 				 				{				 				
