@@ -4,7 +4,7 @@
 Conan is a network trafiic analyser that investigates pcap file, it reads the packets, reassembles all the TCP connections in the network trace, and for each connection it looks for any ambiguities.
 
 ## Motivations
-This program is submitted as a project for the digital forensic course tought at **EURECOM** engineering school. It touches the need of an efficient, reliable and easy to use network traffic analyser to speed up and improve a network forensic operation. 
+This program is submitted as a project for the digital forensic course tought at [**EURECOM**](http://www.eurecom.fr/) engineering school. It touches the need of an efficient, reliable and easy to use network traffic analyser to speed up and improve a network forensic operation. 
 
 ## What are the ambiguities it looks for?
 Conan looks in each TCP connections for retransmitted packets, and investigates further in each of them, it checks if the retransmission was partially or fully retransmitted and checks if this retransmission holds new data or the same data ( the new data may overlap with the old one). It also checks for multiple MacAddresses and multiple time to live used in one connection. 
