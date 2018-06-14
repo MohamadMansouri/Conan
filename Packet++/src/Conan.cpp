@@ -130,6 +130,10 @@ connectionAnalysisStruct::connectionAnalysisStruct()
 	
 	newTtlData[0] = NULL;
 	newTtlData[1] = NULL;
+
+	initialSeq[0] = 0;
+	initialSeq[1] = 0;
+	weired = false;
 }
 
 connectionAnalysisStruct::~connectionAnalysisStruct()
@@ -235,6 +239,9 @@ void connectionAnalysisStruct::copyData(const connectionAnalysisStruct& other)
 	newDstMacDataLength[1] = other.newDstMacDataLength[1];
 	newTtlDataLength[0] = other.newTtlDataLength[0];
 	newTtlDataLength[1] = other.newTtlDataLength[1];
+	initialSeq[0] = other.initialSeq[0];
+	initialSeq[1] = other.initialSeq[1];
+	weired = other.weired;
 
 
 	if (other.data[0] != NULL)
@@ -690,15 +697,15 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		tcpReassemblyData = iter->second;
 
 
-	connectionAnalysisStruct* connAnalysisTemp=NULL;
+	connectionAnalysisStruct* connAnalysisInst = NULL;
 	std::map<uint32_t, connectionAnalysisStruct*>::iterator connectionAnalysisIter = connAnalysis.find(flowKey);
 	if (connectionAnalysisIter == connAnalysis.end())
 	{
-		connAnalysisTemp = new connectionAnalysisStruct();
-		connAnalysis[flowKey]=connAnalysisTemp;
+		connAnalysisInst = new connectionAnalysisStruct();
+		connAnalysis[flowKey]=connAnalysisInst;
 	}
 	else 
-		connAnalysisTemp = connectionAnalysisIter->second;
+		connAnalysisInst = connectionAnalysisIter->second;
 	
 	int sideIndex = -1;
 	bool first = false;
@@ -718,9 +725,9 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		//tcpReassemblyData->twoSides[sideIndex].setSrcMac(srcMac);
 		//if(!tcpReassemblyData->twoSides[sideIndex].isOverlaped)
 		//	tcpReassemblyData->twoSides[sideIndex].isOverlaped=Overlaped;
-		connAnalysisTemp->Port[sideIndex] = srcPort;
-		connAnalysisTemp->setSideZeroIP(srcIP);
-		connAnalysisTemp->setSideOneIP(dstIP);
+		connAnalysisInst->Port[sideIndex] = srcPort;
+		connAnalysisInst->setSideZeroIP(srcIP);
+		connAnalysisInst->setSideOneIP(dstIP);
 
 		first = true;
 	}
@@ -740,9 +747,9 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 			tcpReassemblyData->twoSides[sideIndex].setSrcIP(srcIP);
 			tcpReassemblyData->twoSides[sideIndex].srcPort = srcPort;
 
-			connAnalysisTemp->Port[sideIndex] = srcPort;
-			connAnalysisTemp->setSideZeroIP(srcIP);
-			connAnalysisTemp->setSideOneIP(dstIP);
+			connAnalysisInst->Port[sideIndex] = srcPort;
+			connAnalysisInst->setSideZeroIP(srcIP);
+			connAnalysisInst->setSideOneIP(dstIP);
 
 
 			tcpReassemblyData->numOfSides++;
@@ -778,14 +785,9 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 	}
 
 	
-	connAnalysisTemp->pushNewData(sideIndex, sourceMac, destinationMac, ttl, tcpLayer->getLayerPayload(), tcpPayloadSize);
+	connAnalysisInst->pushNewData(sideIndex, sourceMac, destinationMac, ttl, tcpLayer->getLayerPayload(), tcpPayloadSize);
 
-	//std::cout << srcMac->toString() << " -- " << tcpReassemblyData->twoSides[sideIndex].srcMac->toString() << std::endl;
-	// check if the source MacAddress of the packet is the same as the one used in the first packet from this side
-//	if (*tcpReassemblyData->twoSides[sideIndex].srcMac != *srcMac)
-//					{
-//						printf("ya3tek l3afye\n");
-//					}
+
 	// if this side already got FIN or RST packet before, ignore this packet as this side is considered closed
 	if (tcpReassemblyData->twoSides[sideIndex].gotFinOrRst)
 	{
@@ -801,306 +803,318 @@ void TcpReassembly::reassemblePacket(Packet& tcpData, bool Overlaped, std::map<u
 		handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
 		return;
 	}
+	
+	uint32_t sequenceTemp = ntohl(tcpLayer->getTcpHeader()->sequenceNumber);
 
-	// check if this packet contains data from a different side than the side seen before.
-	// If this is the case then treat the out-of-order packet list as missing data and send them to the user (callback) together with an indication that some data was missing.
-	// Why? because a new packet from the other side means the previous message was probably already received and a new message is starting.
-	// In this case out-of-order packets are probably actually missing data
-	// For example: let's assume these are HTTP messages. If we're seeing the first packet of a response this means the server has already received the full request and is now starting
-	// to send the response. So if we still have out-of-order packets from the request it probably means that some packets were lost during the capture. So we don't expect the client to
-	// continue sending packets of the previous request, so we'll treat the out-of-order packets as missing data
-	//
-	// I'm aware that there are edge cases where the situation I described above is not true, but at some point we must clean the out-of-order packet list to avoid memory leak.
-	// I decided to do what Wireshark does and clean this list when starting to see a message from the other side
-	if (!first && tcpPayloadSize > 0 && tcpReassemblyData->prevSide != -1 && tcpReassemblyData->prevSide != sideIndex &&
-			tcpReassemblyData->twoSides[tcpReassemblyData->prevSide].tcpFragmentList.size() > 0)
+	// check if this is a not a weired connection, skip the packet if it is
+	if (first || sequenceTemp >= connAnalysisInst->initialSeq[sideIndex])
 	{
-		LOG_DEBUG("Seeing a first data packet from a different side. Previous side was %d, current side is %d", tcpReassemblyData->prevSide, sideIndex);
-		checkOutOfOrderFragments(tcpReassemblyData, tcpReassemblyData->prevSide, true, connAnalysisTemp);
-	}
-	tcpReassemblyData->prevSide = sideIndex;
-
-	// extract sequence value from packet
-	uint32_t sequence = ntohl(tcpLayer->getTcpHeader()->sequenceNumber);
-
-	// if it's the first packet we see on this side of the connection
-	if (first)
-	{
-		
-		connAnalysisTemp->packetNumber[sideIndex] = count;
-		size_t dataLength;
-		uint8_t* data;
-		
-		if (connAnalysisTemp->dataLength[sideIndex] != 0 && connAnalysisTemp->data[sideIndex] != NULL)
+		// check if this packet contains data from a different side than the side seen before.
+		// If this is the case then treat the out-of-order packet list as missing data and send them to the user (callback) together with an indication that some data was missing.
+		// Why? because a new packet from the other side means the previous message was probably already received and a new message is starting.
+		// In this case out-of-order packets are probably actually missing data
+		// For example: let's assume these are HTTP messages. If we're seeing the first packet of a response this means the server has already received the full request and is now starting
+		// to send the response. So if we still have out-of-order packets from the request it probably means that some packets were lost during the capture. So we don't expect the client to
+		// continue sending packets of the previous request, so we'll treat the out-of-order packets as missing data
+		//
+		// I'm aware that there are edge cases where the situation I described above is not true, but at some point we must clean the out-of-order packet list to avoid memory leak.
+		// I decided to do what Wireshark does and clean this list when starting to see a message from the other side
+		if (!first && tcpPayloadSize > 0 && tcpReassemblyData->prevSide != -1 && tcpReassemblyData->prevSide != sideIndex &&
+				tcpReassemblyData->twoSides[tcpReassemblyData->prevSide].tcpFragmentList.size() > 0)
 		{
-			dataLength = connAnalysisTemp->dataLength[sideIndex];
-			data = new uint8_t[dataLength];
-			memcpy(data,connAnalysisTemp->data[sideIndex],dataLength);
+			LOG_DEBUG("Seeing a first data packet from a different side. Previous side was %d, current side is %d", tcpReassemblyData->prevSide, sideIndex);
+			checkOutOfOrderFragments(tcpReassemblyData, tcpReassemblyData->prevSide, true, connAnalysisInst);
 		}
-		else
+		tcpReassemblyData->prevSide = sideIndex;
+
+		// extract sequence value from packet
+		uint32_t sequence = ntohl(tcpLayer->getTcpHeader()->sequenceNumber);
+
+		// if it's the first packet we see on this side of the connection
+		if (first)
 		{
-			dataLength = 0;
-			data = NULL;
-		}
-
-		if (tcpPayloadSize != 0)
-		{
-			connAnalysisTemp->dataLength[sideIndex] = tcpPayloadSize;
-			connAnalysisTemp->data[sideIndex] = new uint8_t[tcpPayloadSize];
-			memcpy(connAnalysisTemp->data[sideIndex],tcpLayer->getLayerPayload(),tcpPayloadSize);
-		}
-
-		LOG_DEBUG("First data from this side of the connection");
-
-		tcpReassemblyData->twoSides[sideIndex].prevSequence=sequence;
-		// set initial sequence
-		tcpReassemblyData->twoSides[sideIndex].sequence = sequence + tcpPayloadSize;
-		if (tcpLayer->getTcpHeader()->synFlag != 0)
-			tcpReassemblyData->twoSides[sideIndex].sequence++;
-		
-
-
-		// send data to the callback
-		if (tcpPayloadSize != 0 && m_OnMessageReadyCallback != NULL)
-		{
-			TcpStreamData streamData(tcpLayer->getLayerPayload(), tcpPayloadSize, tcpReassemblyData->connData);
-			streamData.setDeleteDataOnDestruction(false);
-			m_OnMessageReadyCallback(sideIndex, streamData, m_UserCookie);
-		}
-
-		// handle case where this packet is FIN or RST (although it's unlikely)
-		if (isFinOrRst)
-			handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
-
-		// return - nothing else to do here
-		return;
-	}
-	// if packet is tcp keep-alive message
-	if (sequence == tcpReassemblyData->twoSides[sideIndex].sequence - 1 && tcpPayloadSize == 0)
-	{
-			LOG_DEBUG("Received Tcp keep-alive message");
-
-			// handle case where this packet is FIN or RST
-			if (isFinOrRst)
-				handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
-
-			return;
-	}
-	// if packet sequence is smaller than expected - this means that part or all of the TCP data is being re-transmitted
-	if (sequence < tcpReassemblyData->twoSides[sideIndex].sequence)
-	{
-		
-		int oldPacketNumber = connAnalysisTemp->packetNumber[sideIndex];
-		connAnalysisTemp->packetNumber[sideIndex] = count;
-		size_t dataLength;
-		uint8_t* data;
-		
-		if (connAnalysisTemp->dataLength[sideIndex] != 0 && connAnalysisTemp->data[sideIndex] != NULL)
-		{
-			dataLength = connAnalysisTemp->dataLength[sideIndex];
-			data = new uint8_t[dataLength];
-			memcpy(data,connAnalysisTemp->data[sideIndex],dataLength);
-		}
-		else
-		{
-			dataLength = 0;
-			data = NULL;
-		}
-
-		if (tcpPayloadSize != 0)
-		{
-			connAnalysisTemp->dataLength[sideIndex] = tcpPayloadSize;
-			connAnalysisTemp->data[sideIndex] = new uint8_t[tcpPayloadSize];
-			memcpy(connAnalysisTemp->data[sideIndex],tcpLayer->getLayerPayload(),tcpPayloadSize);
-		}
-
-
-		LOG_DEBUG("Found new data with the sequence lower than expected");
-		// create a retransmission instance
-		retransmission retransTemp;
-		// calculate the previous data packet number
-		retransTemp.oldPacketNumber = oldPacketNumber; 
-		// save the current packet number
-		retransTemp.newPacketNumber = count; 
-		
-		if (data != NULL)
-		{
-			// calculate the data of the previous data packet 
-			retransTemp.oldDataLength = dataLength;
-			retransTemp.oldData = new uint8_t[dataLength];
-			memcpy(retransTemp.oldData,data,dataLength);
-		
-			// if their is new data calculate them
-			if ( retransTemp.oldDataLength != tcpPayloadSize || memcmp(tcpLayer->getLayerPayload(),retransTemp.oldData,tcpPayloadSize) )
+			
+			connAnalysisInst->packetNumber[sideIndex] = count;
+			connAnalysisInst->initialSeq[sideIndex] = sequence;
+			size_t dataLength;
+			uint8_t* data;
+			
+			if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
 			{
-				//  the offset of the new data
-				retransTemp.offset = sequence - tcpReassemblyData->twoSides[sideIndex].prevSequence;
-
-				retransTemp.transmissionWithNewData = true;
-				retransTemp.newDataLength = tcpPayloadSize;
-				retransTemp.newData = new uint8_t[tcpPayloadSize];
-				memcpy(retransTemp.newData,tcpLayer->getLayerPayload(),tcpPayloadSize);
+				dataLength = connAnalysisInst->dataLength[sideIndex];
+				data = new uint8_t[dataLength];
+				memcpy(data,connAnalysisInst->data[sideIndex],dataLength);
 			}
-		}
-		else 
-		{
-			retransTemp.oldDataLength = 0;
-			retransTemp.oldData = NULL;
-			retransTemp.newDataLength = 0;
-			retransTemp.newData = NULL;
-		}
-
-
-		// calculate the sequence after this packet to see if this TCP payload contains also new data
-		uint32_t newSequence = sequence + tcpPayloadSize;
-
-		// save if the packet is a full or partial retransmission of the previous packet
-		if (tcpReassemblyData->twoSides[sideIndex].prevSequence == sequence)
-			retransTemp.fullRetransmission=true;
-		else
-			retransTemp.partialRetransmission=true;
-
-		connAnalysisTemp->retransmitted[sideIndex].push_back(retransTemp) ; 
-		
-		// this means that some of payload is new ( other than the retransmitted ones )
-		if (newSequence > tcpReassemblyData->twoSides[sideIndex].sequence)
-		{
-
-
-			// calculate the size of the new data
-			uint32_t newLength = tcpReassemblyData->twoSides[sideIndex].sequence - sequence;
-
-			LOG_DEBUG("Although sequence is lower than expected payload is long enough to contain new data. Calling the callback with the new data");
-
-			// update the sequence for this side to include the new data that was seen
-			tcpReassemblyData->twoSides[sideIndex].sequence += tcpPayloadSize - newLength;
-
-			// send only the new data to the callback
-			if (m_OnMessageReadyCallback != NULL)
+			else
 			{
-				TcpStreamData streamData(tcpLayer->getLayerPayload() + newLength, tcpPayloadSize - newLength, tcpReassemblyData->connData);
+				dataLength = 0;
+				data = NULL;
+			}
+
+			if (tcpPayloadSize != 0)
+			{
+				connAnalysisInst->dataLength[sideIndex] = tcpPayloadSize;
+				connAnalysisInst->data[sideIndex] = new uint8_t[tcpPayloadSize];
+				memcpy(connAnalysisInst->data[sideIndex],tcpLayer->getLayerPayload(),tcpPayloadSize);
+			}
+
+			LOG_DEBUG("First data from this side of the connection");
+
+			tcpReassemblyData->twoSides[sideIndex].prevSequence=sequence;
+			// set initial sequence
+			tcpReassemblyData->twoSides[sideIndex].sequence = sequence + tcpPayloadSize;
+			if (tcpLayer->getTcpHeader()->synFlag != 0)
+				tcpReassemblyData->twoSides[sideIndex].sequence++;
+			
+
+
+			// send data to the callback
+			if (tcpPayloadSize != 0 && m_OnMessageReadyCallback != NULL)
+			{
+				TcpStreamData streamData(tcpLayer->getLayerPayload(), tcpPayloadSize, tcpReassemblyData->connData);
 				streamData.setDeleteDataOnDestruction(false);
 				m_OnMessageReadyCallback(sideIndex, streamData, m_UserCookie);
 			}
+
+			// handle case where this packet is FIN or RST (although it's unlikely)
+			if (isFinOrRst)
+				handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
+
+			// return - nothing else to do here
+			return;
 		}
-		// Save the sequence as the previous sequence
-		tcpReassemblyData->twoSides[sideIndex].prevSequence=sequence;
-
-		// handle case where this packet is FIN or RST
-		if (isFinOrRst)
-			handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
-
-		// return - nothing else to do here
-		return;
-	}
-
-	// if packet sequence is exactly as expected - this is the "good" case and the most common one
-	else if (sequence == tcpReassemblyData->twoSides[sideIndex].sequence)
-	{
-
-		
-		connAnalysisTemp->packetNumber[sideIndex] = count;
-		size_t dataLength;
-		uint8_t* data;
-		
-		if (connAnalysisTemp->dataLength[sideIndex] != 0 && connAnalysisTemp->data[sideIndex] != NULL)
+		// if packet is tcp keep-alive message
+		if (sequence == tcpReassemblyData->twoSides[sideIndex].sequence - 1 && tcpPayloadSize == 0)
 		{
-			dataLength = connAnalysisTemp->dataLength[sideIndex];
-			data = new uint8_t[dataLength];
-			memcpy(data,connAnalysisTemp->data[sideIndex],dataLength);
+				LOG_DEBUG("Received Tcp keep-alive message");
+
+				// handle case where this packet is FIN or RST
+				if (isFinOrRst)
+					handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
+
+				return;
 		}
+		// if packet sequence is smaller than expected - this means that part or all of the TCP data is being re-transmitted
+		if (sequence < tcpReassemblyData->twoSides[sideIndex].sequence)
+		{
+			
+			int oldPacketNumber = connAnalysisInst->packetNumber[sideIndex];
+			connAnalysisInst->packetNumber[sideIndex] = count;
+			size_t dataLength;
+			uint8_t* data;
+			
+			if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
+			{
+				dataLength = connAnalysisInst->dataLength[sideIndex];
+				data = new uint8_t[dataLength];
+				memcpy(data,connAnalysisInst->data[sideIndex],dataLength);
+			}
+			else
+			{
+				dataLength = 0;
+				data = NULL;
+			}
+
+			if (tcpPayloadSize != 0)
+			{
+				connAnalysisInst->dataLength[sideIndex] = tcpPayloadSize;
+				connAnalysisInst->data[sideIndex] = new uint8_t[tcpPayloadSize];
+				memcpy(connAnalysisInst->data[sideIndex],tcpLayer->getLayerPayload(),tcpPayloadSize);
+			}
+
+
+			LOG_DEBUG("Found new data with the sequence lower than expected");
+			// create a retransmission instance
+			retransmission retransInst;
+			// calculate the previous data packet number
+			retransInst.oldPacketNumber = oldPacketNumber; 
+			// save the current packet number
+			retransInst.newPacketNumber = count; 
+			
+
+			if (data != NULL)
+			{
+				// calculate the data of the previous data packet 
+				retransInst.oldDataLength = dataLength;
+				retransInst.oldData = new uint8_t[dataLength];
+				memcpy(retransInst.oldData,data,dataLength);
+			
+				// if their is new data calculate them
+				if ( retransInst.oldDataLength != tcpPayloadSize || memcmp(tcpLayer->getLayerPayload(),retransInst.oldData,tcpPayloadSize) )
+				{
+					//  the offset of the new data
+					retransInst.offset = sequence - tcpReassemblyData->twoSides[sideIndex].prevSequence;
+
+					retransInst.transmissionWithNewData = true;
+					retransInst.newDataLength = tcpPayloadSize;
+					retransInst.newData = new uint8_t[tcpPayloadSize];
+					memcpy(retransInst.newData,tcpLayer->getLayerPayload(),tcpPayloadSize);
+				}
+			}
+			else 
+			{
+				retransInst.oldDataLength = 0;
+				retransInst.oldData = NULL;
+				retransInst.newDataLength = 0;
+				retransInst.newData = NULL;
+			}
+
+
+			// calculate the sequence after this packet to see if this TCP payload contains also new data
+			uint32_t newSequence = sequence + tcpPayloadSize;
+
+			// save if the packet is a full or partial retransmission of the previous packet
+			if (tcpReassemblyData->twoSides[sideIndex].prevSequence == sequence)
+				retransInst.fullRetransmission=true;
+			else
+				retransInst.partialRetransmission=true;
+
+			connAnalysisInst->retransmitted[sideIndex].push_back(retransInst) ; 
+			
+			// this means that some of payload is new ( other than the retransmitted ones )
+			if (newSequence > tcpReassemblyData->twoSides[sideIndex].sequence)
+			{
+
+
+				// calculate the size of the new data
+				uint32_t newLength = tcpReassemblyData->twoSides[sideIndex].sequence - sequence;
+
+				LOG_DEBUG("Although sequence is lower than expected payload is long enough to contain new data. Calling the callback with the new data");
+
+				// update the sequence for this side to include the new data that was seen
+				tcpReassemblyData->twoSides[sideIndex].sequence += tcpPayloadSize - newLength;
+
+				// send only the new data to the callback
+				if (m_OnMessageReadyCallback != NULL)
+				{
+					TcpStreamData streamData(tcpLayer->getLayerPayload() + newLength, tcpPayloadSize - newLength, tcpReassemblyData->connData);
+					streamData.setDeleteDataOnDestruction(false);
+					m_OnMessageReadyCallback(sideIndex, streamData, m_UserCookie);
+				}
+			}
+			// Save the sequence as the previous sequence
+			tcpReassemblyData->twoSides[sideIndex].prevSequence=sequence;
+
+			// handle case where this packet is FIN or RST
+			if (isFinOrRst)
+				handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
+
+			// return - nothing else to do here
+			return;
+		}
+
+		// if packet sequence is exactly as expected - this is the "good" case and the most common one
+		else if (sequence == tcpReassemblyData->twoSides[sideIndex].sequence)
+		{
+
+			
+			connAnalysisInst->packetNumber[sideIndex] = count;
+			size_t dataLength;
+			uint8_t* data;
+			
+			if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
+			{
+				dataLength = connAnalysisInst->dataLength[sideIndex];
+				data = new uint8_t[dataLength];
+				memcpy(data,connAnalysisInst->data[sideIndex],dataLength);
+			}
+			else
+			{
+				dataLength = 0;
+				data = NULL;
+			}
+
+			if (tcpPayloadSize != 0)
+			{
+				connAnalysisInst->dataLength[sideIndex] = tcpPayloadSize;
+				connAnalysisInst->data[sideIndex] = new uint8_t[tcpPayloadSize];
+				memcpy(connAnalysisInst->data[sideIndex],tcpLayer->getLayerPayload(),tcpPayloadSize);
+			}
+
+			tcpReassemblyData->twoSides[sideIndex].prevSequence=sequence;
+
+			// if TCP data size is 0 - nothing to do
+			if (tcpPayloadSize == 0)
+			{
+				LOG_DEBUG("Payload length is 0, doing nothing");
+
+				// handle case where this packet is FIN or RST
+				if (isFinOrRst)
+					handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
+
+				return;
+			}
+
+			LOG_DEBUG("Found new data with expected sequence. Calling the callback");
+
+			// update the sequence for this side to include TCP data from this packet
+			tcpReassemblyData->twoSides[sideIndex].sequence += tcpPayloadSize;
+
+			// if this is a SYN packet - add +1 to the sequence
+			if (tcpLayer->getTcpHeader()->synFlag != 0)
+				tcpReassemblyData->twoSides[sideIndex].sequence++;
+
+			// send the data to the callback
+			if (m_OnMessageReadyCallback != NULL)
+			{
+				TcpStreamData streamData(tcpLayer->getLayerPayload(), tcpPayloadSize, tcpReassemblyData->connData);
+				streamData.setDeleteDataOnDestruction(false);
+				m_OnMessageReadyCallback(sideIndex, streamData, m_UserCookie);
+			}
+
+			//while (checkOutOfOrderFragments(tcpReassemblyData, sideIndex)) {}
+
+			// now that we've seen new data, go over the list of out-of-order packets and see if one or more of them fits now
+			checkOutOfOrderFragments(tcpReassemblyData, sideIndex, false,connAnalysisInst);
+
+			// handle case where this packet is FIN or RST
+			if (isFinOrRst)
+				handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
+
+			// return - nothing else to do here
+			return;
+		}
+
+		// this case means sequence size of the packet is higher than expected which means the packet is out-of-order or some packets were lost (missing data).
+		// we don't know which of the 2 cases it is at this point so we just add this data to the out-of-order packet list
 		else
 		{
-			dataLength = 0;
-			data = NULL;
-		}
+			// if TCP data size is 0 - nothing to do
+			if (tcpPayloadSize == 0)
+			{
+				LOG_DEBUG("Payload length is 0, doing nothing");
 
-		if (tcpPayloadSize != 0)
-		{
-			connAnalysisTemp->dataLength[sideIndex] = tcpPayloadSize;
-			connAnalysisTemp->data[sideIndex] = new uint8_t[tcpPayloadSize];
-			memcpy(connAnalysisTemp->data[sideIndex],tcpLayer->getLayerPayload(),tcpPayloadSize);
-		}
+				// handle case where this packet is FIN or RST
+				if (isFinOrRst)
+					handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
 
-		tcpReassemblyData->twoSides[sideIndex].prevSequence=sequence;
+				return;
+			}
 
-		// if TCP data size is 0 - nothing to do
-		if (tcpPayloadSize == 0)
-		{
-			LOG_DEBUG("Payload length is 0, doing nothing");
+			// create a new TcpFragment, copy the TCP data to it and add this packet to the the out-of-order packet list
+			TcpFragment* newTcpFrag = new TcpFragment();
+			newTcpFrag->data = new uint8_t[tcpPayloadSize];
+			newTcpFrag->dataLength = tcpPayloadSize;
+			newTcpFrag->sequence = sequence;
+			newTcpFrag->count = count;
+			memcpy(newTcpFrag->data, tcpLayer->getLayerPayload(), tcpPayloadSize);
+			tcpReassemblyData->twoSides[sideIndex].tcpFragmentList.pushBack(newTcpFrag);
+
+			LOG_DEBUG("Found out-of-order packet and added a new TCP fragment with size %d to the out-of-order list of side %d", (int)tcpPayloadSize, sideIndex);
 
 			// handle case where this packet is FIN or RST
 			if (isFinOrRst)
+			{
 				handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
+				return;
+			}
 
-			return;
 		}
-
-		LOG_DEBUG("Found new data with expected sequence. Calling the callback");
-
-		// update the sequence for this side to include TCP data from this packet
-		tcpReassemblyData->twoSides[sideIndex].sequence += tcpPayloadSize;
-
-		// if this is a SYN packet - add +1 to the sequence
-		if (tcpLayer->getTcpHeader()->synFlag != 0)
-			tcpReassemblyData->twoSides[sideIndex].sequence++;
-
-		// send the data to the callback
-		if (m_OnMessageReadyCallback != NULL)
-		{
-			TcpStreamData streamData(tcpLayer->getLayerPayload(), tcpPayloadSize, tcpReassemblyData->connData);
-			streamData.setDeleteDataOnDestruction(false);
-			m_OnMessageReadyCallback(sideIndex, streamData, m_UserCookie);
-		}
-
-		//while (checkOutOfOrderFragments(tcpReassemblyData, sideIndex)) {}
-
-		// now that we've seen new data, go over the list of out-of-order packets and see if one or more of them fits now
-		checkOutOfOrderFragments(tcpReassemblyData, sideIndex, false,connAnalysisTemp);
-
-		// handle case where this packet is FIN or RST
-		if (isFinOrRst)
-			handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
-
-		// return - nothing else to do here
-		return;
 	}
-
-	// this case means sequence size of the packet is higher than expected which means the packet is out-of-order or some packets were lost (missing data).
-	// we don't know which of the 2 cases it is at this point so we just add this data to the out-of-order packet list
 	else
-	{
-		// if TCP data size is 0 - nothing to do
-		if (tcpPayloadSize == 0)
-		{
-			LOG_DEBUG("Payload length is 0, doing nothing");
+		// mark this connection as weired and skip the packet just go to the next one
+		connAnalysisInst->weired = true;
 
-			// handle case where this packet is FIN or RST
-			if (isFinOrRst)
-				handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
-
-			return;
-		}
-
-		// create a new TcpFragment, copy the TCP data to it and add this packet to the the out-of-order packet list
-		TcpFragment* newTcpFrag = new TcpFragment();
-		newTcpFrag->data = new uint8_t[tcpPayloadSize];
-		newTcpFrag->dataLength = tcpPayloadSize;
-		newTcpFrag->sequence = sequence;
-		newTcpFrag->count = count;
-		memcpy(newTcpFrag->data, tcpLayer->getLayerPayload(), tcpPayloadSize);
-		tcpReassemblyData->twoSides[sideIndex].tcpFragmentList.pushBack(newTcpFrag);
-
-		LOG_DEBUG("Found out-of-order packet and added a new TCP fragment with size %d to the out-of-order list of side %d", (int)tcpPayloadSize, sideIndex);
-
-		// handle case where this packet is FIN or RST
-		if (isFinOrRst)
-		{
-			handleFinOrRst(tcpReassemblyData, sideIndex, flowKey, connAnalysis);
-			return;
-		}
-
-	}
 }
 
 void TcpReassembly::reassemblePacket(RawPacket* tcpRawData, std::map<uint32_t, connectionAnalysisStruct*> &connAnalysis)
@@ -1117,7 +1131,7 @@ std::string TcpReassembly::prepareMissingDataMessage(uint32_t missingDataLen)
 }
 
 
-void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyData, int sideIndex, bool cleanWholeFragList, connectionAnalysisStruct* connAnalysisTemp)
+void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyData, int sideIndex, bool cleanWholeFragList, connectionAnalysisStruct* connAnalysisInst)
 {
 
 
@@ -1145,15 +1159,15 @@ void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyDat
 				if (curTcpFrag->sequence == tcpReassemblyData->twoSides[sideIndex].sequence)
 				{
 					
-					connAnalysisTemp->packetNumber[sideIndex] = curTcpFrag->count;
+					connAnalysisInst->packetNumber[sideIndex] = curTcpFrag->count;
 					size_t dataLength;
 					uint8_t* data;
 					
-					if (connAnalysisTemp->dataLength[sideIndex] != 0 && connAnalysisTemp->data[sideIndex] != NULL)
+					if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
 					{
-						dataLength = connAnalysisTemp->dataLength[sideIndex];
+						dataLength = connAnalysisInst->dataLength[sideIndex];
 						data = new uint8_t[dataLength];
-						memcpy(data,connAnalysisTemp->data[sideIndex],dataLength);
+						memcpy(data,connAnalysisInst->data[sideIndex],dataLength);
 					}
 					else
 					{
@@ -1163,9 +1177,9 @@ void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyDat
 
 					if (curTcpFrag->dataLength != 0)
 					{
-						connAnalysisTemp->dataLength[sideIndex] = curTcpFrag->dataLength;
-						connAnalysisTemp->data[sideIndex] = new uint8_t[curTcpFrag->dataLength];
-						memcpy(connAnalysisTemp->data[sideIndex],curTcpFrag->data,curTcpFrag->dataLength);
+						connAnalysisInst->dataLength[sideIndex] = curTcpFrag->dataLength;
+						connAnalysisInst->data[sideIndex] = new uint8_t[curTcpFrag->dataLength];
+						memcpy(connAnalysisInst->data[sideIndex],curTcpFrag->data,curTcpFrag->dataLength);
 					}
 
 
@@ -1202,16 +1216,16 @@ void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyDat
 				if (curTcpFrag->sequence < tcpReassemblyData->twoSides[sideIndex].sequence)
 				{
 
-					int oldPacketNumber = connAnalysisTemp->packetNumber[sideIndex];
-					connAnalysisTemp->packetNumber[sideIndex] = curTcpFrag->count;
+					int oldPacketNumber = connAnalysisInst->packetNumber[sideIndex];
+					connAnalysisInst->packetNumber[sideIndex] = curTcpFrag->count;
 					size_t dataLength;
 					uint8_t* data;
 					
-					if (connAnalysisTemp->dataLength[sideIndex] != 0 && connAnalysisTemp->data[sideIndex] != NULL)
+					if (connAnalysisInst->dataLength[sideIndex] != 0 && connAnalysisInst->data[sideIndex] != NULL)
 					{
-						dataLength = connAnalysisTemp->dataLength[sideIndex];
+						dataLength = connAnalysisInst->dataLength[sideIndex];
 						data = new uint8_t[dataLength];
-						memcpy(data,connAnalysisTemp->data[sideIndex],dataLength);
+						memcpy(data,connAnalysisInst->data[sideIndex],dataLength);
 					}
 					else
 					{
@@ -1221,44 +1235,44 @@ void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyDat
 
 					if (curTcpFrag->dataLength != 0)
 					{
-						connAnalysisTemp->dataLength[sideIndex] = curTcpFrag->dataLength;
-						connAnalysisTemp->data[sideIndex] = new uint8_t[curTcpFrag->dataLength];
-						memcpy(connAnalysisTemp->data[sideIndex],curTcpFrag->data,curTcpFrag->dataLength);
+						connAnalysisInst->dataLength[sideIndex] = curTcpFrag->dataLength;
+						connAnalysisInst->data[sideIndex] = new uint8_t[curTcpFrag->dataLength];
+						memcpy(connAnalysisInst->data[sideIndex],curTcpFrag->data,curTcpFrag->dataLength);
 					}
 
 					// create a retransmission instance
-					retransmission retransTemp;
+					retransmission retransInst;
 					// calculate the previous data packet number
-					retransTemp.oldPacketNumber = oldPacketNumber; 
+					retransInst.oldPacketNumber = oldPacketNumber; 
 					// save the current packet number
-					retransTemp.newPacketNumber = curTcpFrag->count; 
+					retransInst.newPacketNumber = curTcpFrag->count; 
 					
 					
 					if (data != NULL)
 					{
 						// calculate the data of the previous data packet 
-						retransTemp.oldDataLength = dataLength;
-						retransTemp.oldData = new uint8_t[dataLength];
-						memcpy(retransTemp.oldData,data,dataLength);
+						retransInst.oldDataLength = dataLength;
+						retransInst.oldData = new uint8_t[dataLength];
+						memcpy(retransInst.oldData,data,dataLength);
 					
 						// if their is new data calculate them
-						if ( retransTemp.oldDataLength != curTcpFrag->dataLength || memcmp(curTcpFrag->data,retransTemp.oldData,curTcpFrag->dataLength) )
+						if ( retransInst.oldDataLength != curTcpFrag->dataLength || memcmp(curTcpFrag->data,retransInst.oldData,curTcpFrag->dataLength) )
 						{
 							//  the offset of the new data
-							retransTemp.offset = curTcpFrag->sequence - tcpReassemblyData->twoSides[sideIndex].prevSequence;
+							retransInst.offset = curTcpFrag->sequence - tcpReassemblyData->twoSides[sideIndex].prevSequence;
 
-							retransTemp.transmissionWithNewData = true;
-							retransTemp.newDataLength = curTcpFrag->dataLength;
-							retransTemp.newData = new uint8_t[curTcpFrag->dataLength];
-							memcpy(retransTemp.newData,curTcpFrag->data,curTcpFrag->dataLength);
+							retransInst.transmissionWithNewData = true;
+							retransInst.newDataLength = curTcpFrag->dataLength;
+							retransInst.newData = new uint8_t[curTcpFrag->dataLength];
+							memcpy(retransInst.newData,curTcpFrag->data,curTcpFrag->dataLength);
 						}
 					}
 					else 
 					{
-						retransTemp.oldDataLength = 0;
-						retransTemp.oldData = NULL;
-						retransTemp.newDataLength = 0;
-						retransTemp.newData = NULL;
+						retransInst.oldDataLength = 0;
+						retransInst.oldData = NULL;
+						retransInst.newDataLength = 0;
+						retransInst.newData = NULL;
 					}
 
 
@@ -1267,11 +1281,11 @@ void TcpReassembly::checkOutOfOrderFragments(TcpReassemblyData* tcpReassemblyDat
 
 					// save if the packet is a full or partial retransmission of the previous packet
 					if (tcpReassemblyData->twoSides[sideIndex].prevSequence == curTcpFrag->sequence)
-						retransTemp.fullRetransmission=true;
+						retransInst.fullRetransmission=true;
 					else
-						retransTemp.partialRetransmission=true;
+						retransInst.partialRetransmission=true;
 
-					connAnalysisTemp->retransmitted[sideIndex].push_back(retransTemp) ; 
+					connAnalysisInst->retransmitted[sideIndex].push_back(retransInst) ; 
 
 
 					// it has new data
@@ -1409,15 +1423,15 @@ void TcpReassembly::handleFinOrRst(TcpReassemblyData* tcpReassemblyData, int sid
 	// check if the other side also sees FIN or RST packet. If so - close the flow. Otherwise - only clear the out-of-order packets for this side
 	int otherSideIndex = 1 - sideIndex;
 
-	connectionAnalysisStruct* connAnalysisTemp=NULL;
+	connectionAnalysisStruct* connAnalysisInst=NULL;
 	std::map<uint32_t, connectionAnalysisStruct*>::iterator connectionAnalysisIter = ConnAnalysis.find(flowKey);
-	connAnalysisTemp = connectionAnalysisIter->second;
+	connAnalysisInst = connectionAnalysisIter->second;
 	
 	if (tcpReassemblyData->twoSides[otherSideIndex].gotFinOrRst)
 
 		closeConnectionInternal(flowKey, TcpReassembly::TcpReassemblyConnectionClosedByFIN_RST, ConnAnalysis);
 	else
-		checkOutOfOrderFragments(tcpReassemblyData, sideIndex, true, connAnalysisTemp);
+		checkOutOfOrderFragments(tcpReassemblyData, sideIndex, true, connAnalysisInst);
 }
 
 void TcpReassembly::closeConnection(uint32_t flowKey, std::map<uint32_t, connectionAnalysisStruct*> &ConnAnalysis)
@@ -1439,21 +1453,21 @@ void TcpReassembly::closeConnectionInternal(uint32_t flowKey, ConnectionEndReaso
 
 	tcpReassemblyData = iter->second;
 
-	connectionAnalysisStruct* connAnalysisTemp=NULL;
+	connectionAnalysisStruct* connAnalysisInst=NULL;
 	std::map<uint32_t, connectionAnalysisStruct*>::iterator connectionAnalysisIter = ConnAnalysis.find(flowKey);
-	connAnalysisTemp = connectionAnalysisIter->second;
+	connAnalysisInst = connectionAnalysisIter->second;
 	
 	LOG_DEBUG("Calling checkOutOfOrderFragments on side 0");
-	checkOutOfOrderFragments(tcpReassemblyData, 0, true, connAnalysisTemp);
+	checkOutOfOrderFragments(tcpReassemblyData, 0, true, connAnalysisInst);
 
 	LOG_DEBUG("Calling checkOutOfOrderFragments on side 1");
-	checkOutOfOrderFragments(tcpReassemblyData, 1, true, connAnalysisTemp);
+	checkOutOfOrderFragments(tcpReassemblyData, 1, true, connAnalysisInst);
 
 	if (m_OnConnEnd != NULL)
-		m_OnConnEnd(connAnalysisTemp,tcpReassemblyData->connData, reason, m_UserCookie, m_cnxNumber, m_cnxNumberLength);
+		m_OnConnEnd(connAnalysisInst,tcpReassemblyData->connData, reason, m_UserCookie, m_cnxNumber, m_cnxNumberLength);
 
 	delete tcpReassemblyData;
-	delete connAnalysisTemp;
+	delete connAnalysisInst;
 	ConnAnalysis.erase(connectionAnalysisIter);
 	m_ConnectionList.erase(iter);
 	m_ClosedConnectionList[flowKey] = true;
@@ -1468,17 +1482,17 @@ void TcpReassembly::closeAllConnections( std::map<uint32_t, connectionAnalysisSt
 	while (!m_ConnectionList.empty())
 	{
 		TcpReassemblyData* tcpReassemblyData = m_ConnectionList.begin()->second;
-		connectionAnalysisStruct* connAnalysisTemp = ConnAnalysis.begin()->second;
+		connectionAnalysisStruct* connAnalysisInst = ConnAnalysis.begin()->second;
 		uint32_t flowKey = tcpReassemblyData->connData.flowKey;
 		LOG_DEBUG("Closing connection with flow key 0x%X", flowKey);
 
 		LOG_DEBUG("Calling checkOutOfOrderFragments on side 0");
-		checkOutOfOrderFragments(tcpReassemblyData, 0, true, connAnalysisTemp);
+		checkOutOfOrderFragments(tcpReassemblyData, 0, true, connAnalysisInst);
 
 		LOG_DEBUG("Calling checkOutOfOrderFragments on side 1");
-		checkOutOfOrderFragments(tcpReassemblyData, 1, true, connAnalysisTemp);
+		checkOutOfOrderFragments(tcpReassemblyData, 1, true, connAnalysisInst);
 		if (m_OnConnEnd != NULL)
-			m_OnConnEnd(connAnalysisTemp,tcpReassemblyData->connData, TcpReassemblyConnectionClosedManually, m_UserCookie, m_cnxNumber, m_cnxNumberLength);
+			m_OnConnEnd(connAnalysisInst,tcpReassemblyData->connData, TcpReassemblyConnectionClosedManually, m_UserCookie, m_cnxNumber, m_cnxNumberLength);
 		ConnAnalysis.erase(ConnAnalysis.begin());
 
 		delete tcpReassemblyData;

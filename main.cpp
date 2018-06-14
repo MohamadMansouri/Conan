@@ -528,6 +528,8 @@ bool checkCnxNumber (int count, int* cnxNumber, int cnxNumberLength)
 	return false;
 }
 
+
+
 /**
  * The callback being called by the TCP reassembly module whenever a connection is ending. This method removes the connection from the connection manager and writes the metadata file if requested
  * by the user
@@ -537,7 +539,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 	static int count=0;
 	bool ambiguous = false;
 	count ++;
-
+	bool weired = endedConnection->weired;
 	//check if it contains multiple macAddresses
 	int multipleMac = checkMultipleMac(endedConnection->srcMac, endedConnection->dstMac);
 	int multipleTtl = checkMultipleTtl(endedConnection->ttl);
@@ -574,7 +576,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 		std::cout << "["<< std::left << std::setw(3) << count << "] " << 
 		"First Side : [" << std::left << std::setw(15) << sourceIP << ":" << std::setw(5) << srcPort <<
 		"] Second Side : [" << std::left << std::setw(15) << destIP << ":" << std::setw(5) << dstPort << "] retransmission : [ ";
-		if (!endedConnection->retransmitted[0].empty() || !endedConnection->retransmitted[1].empty())
+		if (!endedConnection->retransmitted[0].empty() || !endedConnection->retransmitted[1].empty() || weired)
 			std::cout << red <<"true " << reset;
 		else
 			std::cout << "false";
@@ -594,6 +596,12 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 		int multipleTtlIndex = checkMultipleTtl(endedConnection->ttl);
 		if (GlobalConfig::getInstance().verbose > 0 )
 		 {
+	 		if(weired)
+	 		{
+				std::cout << red;
+	 			printf("    This connections has a retransmitted packet of an uncaptured packet that has a sequence number less than the sequence number of the first packet seen in this network (this packet is skipped)\n");
+	 			std::cout << yellow;
+	 		}
 	 		std::cout << yellow ;
 		 	if(!endedConnection->retransmitted[0].empty() || multipleMacIndex == 1 || multipleMacIndex == 2 ||  multipleTtlIndex == 1)
 		 	{
@@ -699,6 +707,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 		 	std::cout << yellow;
 		 	if(!endedConnection->retransmitted[1].empty() || multipleMacIndex == 3 || multipleMacIndex == 4 ||  multipleTtlIndex == 2)
 		 	{
+	 		
 	 			printf("    Side 2:\n");
 		 	
 	 			if (multipleMacIndex == 3)
@@ -772,7 +781,7 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			 			else
 			 				printf("retransmitted ");
 			 			if(endedConnection->retransmitted[1].at(i).transmissionWithNewData && endedConnection->retransmitted[1].at(i).newData != NULL && endedConnection->retransmitted[1].at(i).newDataLength != 0 )			 			{
-			 				printf("in packet number %d ",endedConnection->retransmitted[0].at(i).newPacketNumber);
+			 				printf("in packet number %d ",endedConnection->retransmitted[1].at(i).newPacketNumber);
 			 				printf("with new data\n");
 			 				if (GlobalConfig::getInstance().verbose == 2)
 			 				{

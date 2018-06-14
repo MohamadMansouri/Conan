@@ -97,6 +97,8 @@ struct connectionAnalysisStruct
 	int packetNumber[2];
 	size_t dataLength[2];
 	uint8_t* data[2];
+	uint32_t initialSeq[2];
+	bool weired;
 
 	connectionAnalysisStruct() ;
 
