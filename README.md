@@ -4,7 +4,7 @@
 * [Motivations](#motivations)
 * [What are the ambiguities it looks for?](#what-are-the-ambiguities-it-looks-for)
 * [How does it work?](#how-does-it-work)
-* [What is it composed of?](#What-is-it-composed-of)
+* [What is it composed of?](#what-is-it-composed-of)
 * [Usage](#usage)
 * [Launching it](#launching-it)
     * [Prerequisites](#prerequisites)
