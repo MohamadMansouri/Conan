@@ -1,15 +1,15 @@
 # Conan
 **Outline:**
-* [What is it about?](#What-is-it-about)
-* [Motivations](#Motivations)
-* [What are the ambiguities it looks for?](#What-are-the-ambiguities-it-looks-for)
-* [How does it work?](#How-does-it-work)
+* [What is it about?](#what-is-it-about)
+* [Motivations](#motivations)
+* [What are the ambiguities it looks for?](#what-are-the-ambiguities-it-looks-for)
+* [How does it work?](#how-does-it-work)
 * [What is it composed of?](#What-is-it-composed-of)
-* [Usage](#Usage)
-* [Launching it](#Launching-it)
-    * [Prerequisites](#Prerequisites)
-    * [Compilation](#Compilation)
-    * [Execution](#Execution)
+* [Usage](#usage)
+* [Launching it](#launching-it)
+    * [Prerequisites](#prerequisites)
+    * [Compilation](#compilation)
+    * [Execution](#execution)
 
 ## What is it about?
 Conan is a network traffic analyzer that investigates pcap file, it reads the packets, reassembles all the TCP connections in the network trace, and for each connection it looks for any ambiguities.
