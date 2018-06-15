@@ -56,8 +56,8 @@ The project is built on the PcapPlusPlus library, you can find all the library f
     Output:
       
     [Packet_#] First_Side_IP:First_Side_Port --> Second_Side_IP:Second_Side_Port ???
-    R = retransmission with different data
-    r = retransmission with same data
+    R = Retransmission with different data
+    r = Retransmission with same data
     M = Multiple MACs
     T = Multiple TTLs
     _ = Normal
