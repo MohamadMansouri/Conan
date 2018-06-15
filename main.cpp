@@ -308,8 +308,12 @@ void printUsage()
 			"    -v                  : Set the verbose of the output (possible values are 0,1,2 (default 0))\n"
 			"    -h                  : Display this help message and exit\n"
 			"\nOutput:\n\n"
-			"[Packet_#] [First_Side_IP:First_Side_Port] --> [Second_Side_IP:Second_Side_Port] R : [Retransmission] M : [Multiple_MacAddresses] T : [Multiple_TTL]\n",AppName::get().c_str());
-
+			"[Packet_#] First_Side_IP:First_Side_Port --> Second_Side_IP:Second_Side_Port ???\n"
+			"R = retransmission with different data\n"
+			"r = retransmission with same data\n"
+			"M = Multiple MACs\n"
+			"T = Multiple TTLs\n"
+			"_ = Normal\n\n",AppName::get().c_str());
 	exit(0);
 }
 
@@ -513,6 +517,14 @@ bool checkCnxNumber (int count, int* cnxNumber, int cnxNumberLength)
 	return false;
 }
 
+bool checkSameDate (connectionAnalysisStruct* endedConnection)
+{
+	for(int i=0;i<2;i++)
+		for(uint j=0; j < endedConnection->retransmitted[i].size();j++ )
+			if(endedConnection->retransmitted[i].at(j).transmissionWithNewData)
+				return true;
+	return false;
+}
 
 
 /**
@@ -553,27 +565,27 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 		size_t srcPort = endedConnection->Port[0];
 		size_t dstPort = endedConnection->Port[1]; 
 
+		std::string srcIPport = sourceIP + ":" + std::to_string(srcPort);
+		std::string dstIPport = destIP + ":" + std::to_string(dstPort);
 
-		std::replace(sourceIP.begin(), sourceIP.end(), ':', '_');
-		std::replace(destIP.begin(), destIP.end(), ':', '_');
-		std::cout.setf(std::ios::boolalpha);
 		std::cout << "["<< std::left << std::setw(3) << count << "] " << 
-		"[" << std::left << std::setw(15) << sourceIP << ":" << std::setw(5) << srcPort <<
-		"] --> [" << std::left << std::setw(15) << destIP << ":" << std::setw(5) << dstPort << "] R : [ ";
+		std::left << std::setw(21) << srcIPport <<
+		" -->  " << std::left << std::setw(21) << dstIPport << " ";
 		if (!endedConnection->retransmitted[0].empty() || !endedConnection->retransmitted[1].empty() || weired)
-			std::cout << red <<"true " << reset;
+			if (checkSameDate(endedConnection))
+				std::cout << "r" ;
+			else
+				std::cout << "R" ;
 		else
-			std::cout << "false";
-		std::cout << " ] M : [ ";
+			std::cout << "_";
 		if ((bool)multipleMac)
-			std::cout << red <<"true " << reset;
+			std::cout <<"M" ;
 		else
-			std::cout << "false";
-		std::cout << " ] T : [ " ;
+			std::cout << "_";
 		if ((bool)multipleTtl)
-			std::cout << red <<"true  " << reset << "]";
+			std::cout <<"T" ;
 		else
-			std::cout << "false ]";
+			std::cout << "_";
 		 std::cout << std::endl ;
 
 		int multipleMacIndex = checkMultipleMac(endedConnection->srcMac, endedConnection->dstMac);

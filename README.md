@@ -38,9 +38,9 @@ The project is built on the PcapPlusPlus library, you can find all the library f
 ## Usage
 
     conan [-hvwmsa] [-r input_file] [-o output_dir] [-e bpf_filter] [-f max_files] [-n cnx_number_1 cnx_number_2 ... ]
-     
+        
     Options:
-      
+              
     -r input_file       : Input pcap/pcapng file to analyze. Required argument for reading from file
     -o output_dir       : Specify output directory (default is '.')
     -e bpf_filter       : Apply a BPF filter to capture file or live interface, meaning TCP reassembly will only work on filtered packets
@@ -54,8 +54,14 @@ The project is built on the PcapPlusPlus library, you can find all the library f
     -h                  : Display this help message and exit
      
     Output:
-     
-    [Packet_#] [First_Side_IP:First_Side_Port] --> [Second_Side_IP:Second_Side_Port] R : [Retransmission] M : [Multiple_MacAddresses] T : [Multiple_TTL]
+      
+    [Packet_#] First_Side_IP:First_Side_Port --> Second_Side_IP:Second_Side_Port ???
+    R = retransmission with different data
+    r = retransmission with same data
+    M = Multiple MACs
+    T = Multiple TTLs
+    _ = Normal
+
 
 ## Launching it
 
