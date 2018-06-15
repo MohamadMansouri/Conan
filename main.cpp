@@ -306,7 +306,9 @@ void printUsage()
 			"    -s                  : Write each side of each connection to a separate file (default is writing both sides of each connection to the same file)\n"
 			"    -a                  : Print only connection that has any ambiguity\n"
 			"    -v                  : Set the verbose of the output (possible values are 0,1,2 (default 0))\n"
-			"    -h                  : Display this help message and exit\n\n", AppName::get().c_str());
+			"    -h                  : Display this help message and exit\n"
+			"\nOutput:\n\n"
+			"[Packet_#] [First_Side_IP:First_Side_Port] --> [Second_Side_IP:Second_Side_Port] R : [Retransmission] M : [Multiple_MacAddresses] T : [Multiple_TTL]\n",AppName::get().c_str());
 
 	exit(0);
 }
@@ -533,7 +535,6 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 			GlobalConfig::getInstance().ambiguities++;
 			ambiguous = true;
 		}
-
 	// print this connection if the user didnt specified anything or specified this connection or specifed to print ambigious cnxs and this is one of them
 	if ( checkCnxNumber(count,cnxNumber,cnxNumberLength) || ( !(bool)cnxNumberLength && (GlobalConfig::getInstance().printAll || ambiguous) ))
 	{
@@ -556,20 +557,19 @@ static void tcpReassemblyConnectionEndCallback(connectionAnalysisStruct* endedCo
 		std::replace(sourceIP.begin(), sourceIP.end(), ':', '_');
 		std::replace(destIP.begin(), destIP.end(), ':', '_');
 		std::cout.setf(std::ios::boolalpha);
-
 		std::cout << "["<< std::left << std::setw(3) << count << "] " << 
-		"First Side : [" << std::left << std::setw(15) << sourceIP << ":" << std::setw(5) << srcPort <<
-		"] Second Side : [" << std::left << std::setw(15) << destIP << ":" << std::setw(5) << dstPort << "] retransmission : [ ";
+		"[" << std::left << std::setw(15) << sourceIP << ":" << std::setw(5) << srcPort <<
+		"] --> [" << std::left << std::setw(15) << destIP << ":" << std::setw(5) << dstPort << "] R : [ ";
 		if (!endedConnection->retransmitted[0].empty() || !endedConnection->retransmitted[1].empty() || weired)
 			std::cout << red <<"true " << reset;
 		else
 			std::cout << "false";
-		std::cout << " ] Multiple MacAddreses : [ ";
+		std::cout << " ] M : [ ";
 		if ((bool)multipleMac)
 			std::cout << red <<"true " << reset;
 		else
 			std::cout << "false";
-		std::cout << " ] Multiple TTL : [ " ;
+		std::cout << " ] T : [ " ;
 		if ((bool)multipleTtl)
 			std::cout << red <<"true  " << reset << "]";
 		else
@@ -1007,6 +1007,8 @@ int main(int argc, char* argv[])
 	
 	// create the TCP reassembly instance
 	TcpReassembly tcpReassembly(tcpReassemblyMsgReadyCallback, &connMgr, tcpReassemblyConnectionStartCallback, tcpReassemblyConnectionEndCallback, cnxNumber, cnxNumberLength);
+	
+
 	// analyze packets from pcap file
 	proccessTCPpacket(inputPcapFileName, tcpReassembly, bpfFilter);
 }

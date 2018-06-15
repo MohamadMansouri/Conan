@@ -53,6 +53,10 @@ Options:
     -v                  : Set the verbose of the output (possible values are 0,1,2 (default 0))
     -h                  : Display this help message and exit
 
+Output:
+
+[Packet_#] [First_Side_IP:First_Side_Port] --> [Second_Side_IP:Second_Side_Port] R : [Retransmission] M : [Multiple_MacAddresses] T : [Multiple_TTL]
+
 ## Launching it
 
 ### Prerequisites 
